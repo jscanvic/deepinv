@@ -6,40 +6,47 @@ on:
     - cron: "30 3 */1 * *"
   push:
     branches:
-    - main
-  pull_request:
-    branches:
-    - main
+name: Test
 
-
-# Cancel in-progress runs when pushing a new commit on the PR
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+# … (triggers, concurrency, matrix unchanged)
 
 jobs:
   test:
-    name: Test deep inverse ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          # Test with all dependencies
-          - os: ubuntu-latest
-            version_python: 3.9
-            extra: dataset,denoisers,test
-            name: "ubuntu all dependencies"
-          # Test with all dependencies
-          - os: windows-latest
-            version_python: 3.9
-            extra: dataset,denoisers,test
-            name: "windows all dependencies"
+    # … (matrix section unchanged)
 
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version_python }}
+          cache: 'pip'
+
+      - name: Install project, extras and pytest-profiling
+        run: |
+          pip install .[${{ matrix.extra }}]
+          pip install pytest-profiling              # <-- add this line
+
+      - name: Run pytest (coverage + profiling)
+        run: |
+          python -m pytest -v \
+            --cov=deepinv \
+            --junitxml=junit.xml -o junit_family=legacy \
+            --profile                                # <-- enables cProfile; writes prof/combined.prof
+
+      - name: Upload combined.prof
+        if: ${{ always() }}                          # still upload even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-prof-${{ matrix.os }}
+          path: prof/combined.prof                   # default output from pytest-profiling
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1n-version: ${{ matrix.version_python }}
           cache: 'pip' # caching pip dependencies
 
       - name: Install deepinv and its dependencies

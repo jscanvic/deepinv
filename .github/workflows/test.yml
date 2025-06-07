@@ -2,15 +2,14 @@ name: Test
 
 on:
   schedule:
-    # run test every day at 3:30 AM
+    # run tests every day at 3:30 AM
     - cron: "30 3 */1 * *"
   push:
     branches:
-    - main
+      - main
   pull_request:
     branches:
-    - main
-
+      - main
 
 # Cancel in-progress runs when pushing a new commit on the PR
 concurrency:
@@ -37,23 +36,31 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version_python }}
-          cache: 'pip' # caching pip dependencies
+          cache: 'pip'   # cache pip dependencies
 
       - name: Install deepinv and its dependencies
         run: |
           pip install .[${{ matrix.extra }}]
+          pip install pytest-profiling
 
       - name: Test with pytest and generate coverage report
         run: |
-          python3 -m pytest --cov=deepinv --junitxml=junit.xml -o junit_family=legacy -v
+          python3 -m pytest --cov=deepinv --junitxml=junit.xml -o junit_family=legacy --profile -v
+
+      - name: Upload combined profile
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-prof-${{ matrix.os }}
+          path: prof/combined.prof
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
-
-

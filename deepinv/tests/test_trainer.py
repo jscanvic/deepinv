@@ -136,11 +136,7 @@ def test_get_samples(
     use_physics_generator,
     online_measurements,
     rng,
-<<<<<<< HEAD
-    save_path,
-=======
     tmpdir,
->>>>>>> upstream/main
 ):
     # Dummy constant GT dataset
     class DummyDataset(Dataset):
@@ -232,11 +228,7 @@ def test_get_samples(
             if online_measurements and physics_generator is not None
             else None
         ),
-<<<<<<< HEAD
-        save_path=save_path,
-=======
         save_path=tmpdir,
->>>>>>> upstream/main
     )
 
     iterator = iter(dataloader)
@@ -552,11 +544,7 @@ def test_dataloader_formats(
     measurements,
     online_measurements,
     rng,
-<<<<<<< HEAD
-    save_path,
-=======
     tmpdir,
->>>>>>> upstream/main
 ):
     """Test dataloader return formats
 
@@ -631,11 +619,7 @@ def test_dataloader_formats(
         online_measurements=online_measurements,
         train_dataloader=dataloader,
         optimizer=optimizer,
-<<<<<<< HEAD
-        save_path=save_path,
-=======
         save_path=tmpdir,
->>>>>>> upstream/main
     )
     trainer.setup_train()
     x, y, physics = trainer.get_samples([iter(dataloader)], 0)
@@ -688,11 +672,7 @@ def test_dataloader_formats(
 @pytest.mark.parametrize("early_stop", [True, False])
 @pytest.mark.parametrize("max_batch_steps", [3, 100000])
 def test_early_stop(
-<<<<<<< HEAD
-    dummy_dataset, imsize, device, dummy_model, early_stop, max_batch_steps, save_path
-=======
     dummy_dataset, imsize, device, dummy_model, early_stop, max_batch_steps, tmpdir
->>>>>>> upstream/main
 ):
     torch.manual_seed(0)
     model = dummy_model
@@ -717,11 +697,7 @@ def test_early_stop(
         optimizer=optimizer,
         verbose=False,
         plot_images=True,
-<<<<<<< HEAD
-        save_path=save_path,
-=======
         save_path=tmpdir,
->>>>>>> upstream/main
     )
     with no_plot():
         trainer.train()
@@ -751,11 +727,7 @@ class ConstantLoss(dinv.loss.Loss):
         )
 
 
-<<<<<<< HEAD
-def test_total_loss(dummy_dataset, imsize, device, dummy_model, save_path):
-=======
 def test_total_loss(dummy_dataset, imsize, device, dummy_model, tmpdir):
->>>>>>> upstream/main
     train_data, eval_data = dummy_dataset, dummy_dataset
     dataloader = DataLoader(train_data, batch_size=2)
     eval_dataloader = DataLoader(eval_data, batch_size=2)
@@ -776,11 +748,7 @@ def test_total_loss(dummy_dataset, imsize, device, dummy_model, tmpdir):
         optimizer=torch.optim.AdamW(dummy_model.parameters(), lr=1),
         verbose=False,
         online_measurements=True,
-<<<<<<< HEAD
-        save_path=save_path,
-=======
         save_path=tmpdir,
->>>>>>> upstream/main
     )
 
     trainer.train()
@@ -797,11 +765,7 @@ def test_total_loss(dummy_dataset, imsize, device, dummy_model, tmpdir):
 # epoch 2, and so on. Then, we run the trainer while capturing the standard
 # output to get # the reported values for the gradient norms and compare them
 # to the expected values.
-<<<<<<< HEAD
-def test_gradient_norm(dummy_dataset, imsize, device, dummy_model, save_path):
-=======
 def test_gradient_norm(dummy_dataset, imsize, device, dummy_model, tmpdir):
->>>>>>> upstream/main
     train_data, eval_data = dummy_dataset, dummy_dataset
     dataloader = DataLoader(train_data, batch_size=2)
     physics = dinv.physics.Inpainting(tensor_size=imsize, device=device, mask=0.5)
@@ -812,11 +776,7 @@ def test_gradient_norm(dummy_dataset, imsize, device, dummy_model, tmpdir):
     trainer = dinv.Trainer(
         model,
         device=device,
-<<<<<<< HEAD
-        save_path=save_path,
-=======
         save_path=tmpdir,
->>>>>>> upstream/main
         verbose=True,
         show_progress_bar=False,
         physics=physics,
@@ -878,11 +838,7 @@ def test_gradient_norm(dummy_dataset, imsize, device, dummy_model, tmpdir):
 # value every time it is called. This forces a collision to occur and we make
 # sure that it is detected as it should.
 def test_out_dir_collision_detection(
-<<<<<<< HEAD
-    dummy_dataset, imsize, device, dummy_model, save_path
-=======
     dummy_dataset, imsize, device, dummy_model, tmpdir
->>>>>>> upstream/main
 ):
     train_data, eval_data = dummy_dataset, dummy_dataset
     dataloader = DataLoader(train_data, batch_size=2)
@@ -902,11 +858,7 @@ def test_out_dir_collision_detection(
                 trainer = dinv.Trainer(
                     model,
                     device=device,
-<<<<<<< HEAD
-                    save_path=save_path,
-=======
                     save_path=tmpdir,
->>>>>>> upstream/main
                     verbose=True,
                     show_progress_bar=False,
                     physics=physics,

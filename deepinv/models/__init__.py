@@ -4,6 +4,7 @@ from .scunet import SCUNet
 from .ae import AutoEncoder
 from .unet import UNet, UNet_equi
 from .dncnn import DnCNN
+from .dsccp import DScCP
 from .artifactremoval import ArtifactRemoval
 from .tv import TVDenoiser
 from .tgv import TGVDenoiser

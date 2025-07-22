@@ -1,3 +1,5 @@
+from .checkpoint import Checkpoint, load as load_checkpoint
+
 import warnings
 from deepinv.utils import AverageMeter, get_timestamp, plot, plot_curves
 import os
@@ -379,20 +381,18 @@ class Trainer:
             self.ckpt_pretrained = None
 
         if ckpt_pretrained is not None:
-            checkpoint = torch.load(
-                ckpt_pretrained, map_location=self.device, weights_only=False
-            )
-            self.model.load_state_dict(checkpoint["state_dict"])
-            if "optimizer" in checkpoint and self.optimizer is not None:
-                self.optimizer.load_state_dict(checkpoint["optimizer"])
-            if "scheduler" in checkpoint and self.scheduler is not None:
-                self.scheduler.load_state_dict(checkpoint["scheduler"])
-            if "wandb_id" in checkpoint and self.wandb_vis:
-                self.wandb_setup["id"] = checkpoint["wandb_id"]
+            checkpoint = load_checkpoint(ckpt_pretrained, map_location=self.device)
+            self.model.load_state_dict(checkpoint.state_dict)
+            if checkpoint.optimizer is not None and self.optimizer is not None:
+                self.optimizer.load_state_dict(checkpoint.optimizer)
+            if checkpoint.scheduler is not None and self.scheduler is not None:
+                self.scheduler.load_state_dict(checkpoint.scheduler)
+            if checkpoint.wandb_id is not None and self.wandb_vis:
+                self.wandb_setup["id"] = checkpoint.wandb_id
                 self.wandb_setup["resume"] = "allow"
-            if "epoch" in checkpoint:
-                self.epoch_start = checkpoint["epoch"] + 1
-            return checkpoint
+            if checkpoint.epoch is not None:
+                self.epoch_start = checkpoint.epoch + 1
+            return checkpoint.to_dict()
 
     def log_metrics_wandb(self, logs: dict, step: int, train: bool = True):
         r"""
@@ -908,19 +908,23 @@ class Trainer:
             return
 
         os.makedirs(str(self.save_path), exist_ok=True)
-        state = state | {
-            "epoch": epoch,
-            "state_dict": self.model.state_dict(),
-            "loss": self.loss_history,
-            "optimizer": self.optimizer.state_dict() if self.optimizer else None,
-            "scheduler": self.scheduler.state_dict() if self.scheduler else None,
+        data = state | dict(
+            epoch=epoch,
+            state_dict=self.model.state_dict(),
+            loss=self.loss_history,
+            optimizer=self.optimizer.state_dict() if self.optimizer else None,
+            scheduler=self.scheduler.state_dict() if self.scheduler else None,
+            eval_metrics=self.eval_metrics_history,
         }
-        state["eval_metrics"] = self.eval_metrics_history
         if self.wandb_vis:
-            state["wandb_id"] = wandb.run.id
+            data = data | dict(
+                wandb_id=wandb.run.id,
+            )
+
+        checkpoint = Checkpoint.from_dict(data)
 
         torch.save(
-            state,
+            checkpoint.to_dict(),
             Path(self.save_path) / Path(filename),
         )
 

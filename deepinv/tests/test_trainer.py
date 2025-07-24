@@ -19,6 +19,7 @@ import contextlib
 import re
 import tempfile
 import os
+import time
 
 from conftest import no_plot
 
@@ -851,8 +852,14 @@ def test_out_dir_collision_detection(
 
     # NOTE: Due to the way it's imported in the trainer module we need to patch
     # the importing module instead of the imported module.
-    with patch.object(dinv.training.trainer, "get_timestamp", return_value=timestamp):
-        with pytest.raises(FileExistsError, match=re.escape(timestamp)):
+    # NOTE: We also prevent time.sleep from actually sleeping to save time.
+    with (
+        patch.object(dinv.training.trainer, "get_timestamp", return_value=timestamp),
+        patch.object(time, "sleep", return_value=None),
+    ):
+        with pytest.raises(
+            RuntimeError, match=re.escape("Could not acquire save path")
+        ):
             # Train twice
             for _ in range(2):
                 trainer = dinv.Trainer(

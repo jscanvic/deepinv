@@ -32,7 +32,7 @@ class Rotate(Transform):
         limits: float = 360.0,
         multiples: float = 1.0,
         positive: bool = False,
-        interpolation_mode: InterpolationMode = InterpolationMode.NEAREST,
+        interpolation_mode: InterpolationMode = InterpolationMode.BILINEAR,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)

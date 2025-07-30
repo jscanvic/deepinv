@@ -806,15 +806,40 @@ class Trainer:
                 g,
             )
 
-            # Compute loss and perform backprop
-            loss_cur, x_net, logs = self.compute_loss(
-                physics_cur,
-                x,
-                y,
-                train=train,
-                epoch=epoch,
-                step=(not self.optimizer_step_multi_dataset),
-            )
+            # NOTE: This is a hack. When training with the splitting loss, the
+            # model is wrapped in a SplittingModel which averages the output
+            # for augmented samples at inference time. This is not suitable
+            # when computing the eval loss as it's meant to be as close to the
+            # training loss as possible. For this reason, we set the number of
+            # samples the averaging is done over to 1 and later restore it.
+            import deepinv as dinv
+            from contextlib import contextmanager, nullcontext
+
+            @contextmanager
+            def hack_ctxmgr(model):
+                prev = model.eval_n_samples
+                model.eval_n_samples = 1
+                try:
+                    yield
+                finally:
+                    model.eval_n_samples = prev
+
+            if isinstance(self.model, dinv.loss.SplittingLoss.SplittingModel):
+                ctxmgr = hack_ctxmgr(self.model)
+            else:
+                ctxmgr = nullcontext()
+
+            with ctxmgr:
+                # Compute loss and perform backprop
+                loss_cur, x_net, logs = self.compute_loss(
+                    physics_cur,
+                    x,
+                    y,
+                    train=train,
+                    epoch=epoch,
+                    step=(not self.optimizer_step_multi_dataset),
+                )
+
             loss += loss_cur
 
             # detach the network output for metrics and plotting

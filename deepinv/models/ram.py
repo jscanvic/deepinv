@@ -1,23 +1,42 @@
+from collections import OrderedDict
+from warnings import warn
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import einops
+
 import deepinv as dinv
-from deepinv.physics import MultiScaleLinearPhysics, Pad
+from deepinv.physics import LinearPhysicsMultiScaler, PhysicsCropper
 from deepinv.utils.tensorlist import TensorList
-from deepinv.models.base import Reconstructor
+from deepinv.models.base import Reconstructor, Denoiser
 
 
-class RAM(Reconstructor):
+class RAM(Reconstructor, Denoiser):
     r"""
-    Reconstruct Anything Model.
+    Reconstruct Anything Model (RAM) foundation model.
 
-    This model (proposed in `this paper <https://arxiv.org/abs/2503.08915>`_) is a convolutional neural network (CNN)
-    designed for image reconstruction tasks.
+    Convolutional neural network model :footcite:t:`terris2025reconstruct` that has been trained to work on a large variety
+    of linear image reconstruction tasks and datasets (deblurring, inpainting, denoising, tomography, MRI, etc.).
+
+    See :ref:`sphx_glr_auto_examples_unfolded_demo_ram.py` for examples on the performance of RAM and how to fine-tune the
+    foundation model on a specific problem and dataset.
+
+    The model works both as a reconstructor or denoiser:
+
+    * Reconstructor: RAM takes a :ref:`physics operator <physics>` `model(y, physics)` with an optional noise model defined in the physics
+    * Denoiser: RAM takes optional Gaussian and/or Poisson noise levels (optionally set to 0) `model(y, sigma=sigma, gamma=gamma)`
+
+    .. note::
+
+        The physics operator should be normalized (i.e. have unit norm) for best results.
+        Use :func:`physics.compute_norm() <deepinv.physics.LinearPhysics.compute_norm>` to check this.
 
     :param list in_channels: Number of input channels. If a list is provided, the model will have separate heads for each channel.
     :param str device: Device to which the model should be moved. If None, the model will be created on the default device.
-    :param bool pretrained: If True, the model will be initialized with pretrained weights.
+    :param bool, str pretrained: If `True`, the model will be initialized with pretrained weights. If `str`, load from file.
     :param float sigma_threshold: Threshold (minimum value) for the noise level. Default is 1e-3.
     """
 
@@ -26,7 +45,6 @@ class RAM(Reconstructor):
         in_channels=[1, 2, 3],
         device=None,
         pretrained=True,
-        sigma_threshold=1e-3,
     ):
         super(RAM, self).__init__()
 
@@ -75,12 +93,21 @@ class RAM(Reconstructor):
 
         self.m_tail = OutTail(nc[0], in_channels)
 
-        self.sigma_threshold = sigma_threshold
+        self.sigma_threshold = 5e-3
+        self.gain_threshold = 1e-4
 
         # load pretrained weights from hugging face
         if pretrained:
-            url_download = "https://huggingface.co/mterris/ram/resolve/main/ram.pth.tar"
-            self.load_state_dict(torch.hub.load_state_dict_from_url(url_download))
+            if isinstance(pretrained, (str, Path)):
+                self.load_state_dict(
+                    torch.load(pretrained, map_location=device, weights_only=True)
+                )
+            else:
+                self.load_state_dict(
+                    torch.hub.load_state_dict_from_url(
+                        "https://huggingface.co/mterris/ram/resolve/main/ram.pth.tar"
+                    )
+                )
 
         if device is not None:
             self.to(device)
@@ -91,15 +118,17 @@ class RAM(Reconstructor):
 
         :param float value: constant value
         :param torch.Tensor x: input tensor
+        :return torch.Tensor: a tensor of size (B, 1, W, H) containing constant maps of shapes (W, H) for each value in the batch.
         """
+
         if isinstance(value, torch.Tensor):
             if value.ndim > 0:
                 value_map = value.view(x.size(0), 1, 1, 1)
                 value_map = value_map.expand(-1, 1, x.size(2), x.size(3))
             else:
-                value_map = torch.ones(
-                    (x.size(0), 1, x.size(2), x.size(3)), device=x.device
-                ) * value[None, None, None, None].to(x.device)
+                value_map = einops.repeat(
+                    value, "-> b 1 h w", b=x.size(0), h=x.size(2), w=x.size(3)
+                )
         else:
             value_map = (
                 torch.ones((x.size(0), 1, x.size(2), x.size(3)), device=x.device)
@@ -107,12 +136,20 @@ class RAM(Reconstructor):
             )
         return value_map
 
-    def base_conditioning(self, x, sigma, gamma):
-        noise_level_map = self.constant2map(sigma, x)
-        gamma_map = self.constant2map(gamma, x)
-        return torch.cat((x, noise_level_map, gamma_map), 1)
+    def base_conditioning(self, x, sigma, gain):
+        r"""
+        Stacks the sigma and gain value as additional channel dimensions to the input tensor.
 
-    def realign_input(self, x, physics, y):
+        :param torch.Tensor x: Input tensor
+        :param float sigma: Gaussian noise level
+        :param float gain: Poisson noise gain
+        :return torch.Tensor: Input tensor with additional channels for sigma and gain
+        """
+        noise_level_map = self.constant2map(sigma, x)
+        gain_map = self.constant2map(gain, x)
+        return torch.cat((x, noise_level_map, gain_map), 1)
+
+    def realign_input(self, x, physics, y, sigma):
         r"""
         Realign the input x based on the measurements y and the physics model.
         Applies the proximity operator of the L2 norm with respect to the physics model.
@@ -120,36 +157,12 @@ class RAM(Reconstructor):
         :param torch.Tensor x: Input tensor
         :param deepinv.physics.Physics physics: Physics model
         :param torch.Tensor y: Measurements
+        :return torch.Tensor: Realigned input tensor
         """
         if hasattr(physics, "factor"):
             f = physics.factor
-        elif hasattr(physics, "base") and hasattr(physics.base, "factor"):
-            f = physics.base.factor
-        elif (
-            hasattr(physics, "base")
-            and hasattr(physics.base, "base")
-            and hasattr(physics.base.base, "factor")
-        ):
-            f = physics.base.base.factor
         else:
             f = 1.0
-
-        sigma = 1e-6  # default value
-        if hasattr(physics.noise_model, "sigma"):
-            sigma = physics.noise_model.sigma
-        if (
-            hasattr(physics, "base")
-            and hasattr(physics.base, "noise_model")
-            and hasattr(physics.base.noise_model, "sigma")
-        ):
-            sigma = physics.base.noise_model.sigma
-        if (
-            hasattr(physics, "base")
-            and hasattr(physics.base, "base")
-            and hasattr(physics.base.base, "noise_model")
-            and hasattr(physics.base.base.noise_model, "sigma")
-        ):
-            sigma = physics.base.base.noise_model.sigma
 
         if isinstance(y, TensorList):
             num = y[0].reshape(y[0].shape[0], -1).abs().mean(1)
@@ -163,7 +176,7 @@ class RAM(Reconstructor):
 
         return model_input
 
-    def forward_unet(self, x0, sigma=None, gamma=None, physics=None, y=None):
+    def forward_unet(self, x0, sigma=None, gain=None, physics=None, y=None):
         r"""
         Forward pass of the UNet model.
 
@@ -174,7 +187,7 @@ class RAM(Reconstructor):
         :param torch.Tensor y: measurements
         """
         img_channels = x0.shape[1]
-        physics = MultiScaleLinearPhysics(physics, x0.shape[-3:], device=x0.device)
+        physics = LinearPhysicsMultiScaler(physics, x0.shape[-3:], device=x0.device)
 
         if self.separate_head and img_channels not in self.in_channels:
             raise ValueError(
@@ -182,9 +195,9 @@ class RAM(Reconstructor):
             )
 
         if y is not None:
-            x0 = self.realign_input(x0, physics, y)
+            x0 = self.realign_input(x0, physics, y, sigma)
 
-        x0 = self.base_conditioning(x0, sigma, gamma)
+        x0 = self.base_conditioning(x0, sigma, gain)
 
         x1 = self.m_head(x0)
 
@@ -212,41 +225,109 @@ class RAM(Reconstructor):
 
         return x
 
-    def forward(self, y=None, physics=None):
+    def forward(self, y, physics=None, sigma=None, gain=None):
         r"""
         Reconstructs a signal estimate from measurements y
+
         :param torch.Tensor y: measurements
         :param deepinv.physics.Physics physics: forward operator
+        :param float, torch.Tensor sigma: Gaussian noise level. Ignored if noise_model already specified in physics.
+        :param float, torch.Tensor gain: Poisson noise level. Ignored if noise_model already specified in physics.
+        :return: torch.Tensor: reconstructed signal estimate
         """
+        if physics is None and sigma is None and gain is None:
+            raise ValueError(
+                "Either physics, sigma or gain must be provided to the RAM model."
+            )
+
         if physics is None:
+            gain = self.gain_threshold if gain is None else gain
+            sigma = self.sigma_threshold if sigma is None else sigma
+
             physics = dinv.physics.Denoising(
-                noise_model=dinv.physics.GaussianNoise(sigma=0.0), device=y.device
+                noise_model=dinv.physics.PoissonGaussianNoise(sigma=sigma, gain=gain),
             )
 
         x_temp = physics.A_adjoint(y)
+
+        max_val = x_temp.abs().max()
+        rescale_val = 1.0 if max_val > 5 * self.sigma_threshold else max_val
+        y = y / rescale_val
+
+        if hasattr(physics, "noise_model"):
+            if sigma is not None or gain is not None:
+                warn(
+                    "noise_model specified in physics. Parameters passed to sigma or gain will be ignored."
+                )
+
+            sigma = (
+                physics.noise_model.sigma / rescale_val
+                if hasattr(physics.noise_model, "sigma")
+                else self.sigma_threshold
+            )
+            if isinstance(sigma, TensorList):
+                sigma = sigma.abs().max()
+
+            gain = (
+                physics.noise_model.gain / rescale_val
+                if hasattr(physics.noise_model, "gain")
+                else self.gain_threshold
+            )
+            if isinstance(gain, TensorList):
+                gain = gain.abs().max()
+        else:
+            gain = self.gain_threshold if gain is None else gain
+            sigma = self.sigma_threshold if sigma is None else sigma
+
         pad = (-x_temp.size(-2) % 8, -x_temp.size(-1) % 8)
-        physics = Pad(physics, pad)
+        physics = PhysicsCropper(physics, pad)
 
         x_in = physics.A_adjoint(y)
 
-        sigma = (
-            physics.noise_model.sigma if hasattr(physics.noise_model, "sigma") else 1e-3
-        )
-        sigma = torch.tensor(max(sigma, self.sigma_threshold), device=y.device)
-        gamma = (
-            physics.noise_model.gain if hasattr(physics.noise_model, "gain") else 1e-3
-        )
-        gamma = torch.tensor(max(gamma, 1e-3), device=y.device)
+        sigma = self.threshold_snr(x_temp, sigma, threshold=self.sigma_threshold)
+        sigma = self._handle_sigma(sigma)
 
-        out = self.forward_unet(x_in, sigma=sigma, gamma=gamma, physics=physics, y=y)
+        gain = self.threshold_snr(x_temp, gain, threshold=self.gain_threshold)
+        gain = self._handle_sigma(gain)
 
-        out = physics.remove_pad(out)
+        out = self.forward_unet(x_in, sigma=sigma, gain=gain, physics=physics, y=y)
+
+        out = physics.remove_pad(out) * rescale_val
 
         return out
 
+    def threshold_snr(self, Aty, val, threshold=1e-2, eps=1e-6) -> torch.Tensor:
+        r"""
+        Performs the operation
 
-### --------------- MODEL ---------------
+        .. math::
+            \text{threshold\_snr}(x) = \max(\frac{\text{val}}{\|A^\top y\|/\sqrt{m} + \epsilon}, \text{threshold}) * \|A^\top y\|/\sqrt{m}
+
+        :param torch.Tensor Aty: :math:`A^\top y`
+        :param float val: noise level to threshold
+        :param float threshold: threshold to use
+        :param float eps: small epsilon value.
+        """
+        # Assuming that range is in (0, 1)
+        num = torch.tensor(1.0, device=Aty.device)
+        val_threshold = torch.maximum(val / (num + eps), torch.tensor(threshold)) * num
+        return val_threshold
+
+
 class BaseEncBlock(nn.Module):
+    r"""
+    Base encoding block for the RAM model.
+
+    This block consists of multiple convolutional residual blocks.
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param bool bias: Whether to use bias in the convolution.
+    :param int nb: Number of residual blocks in the encoding block.
+    :param int, list[int] img_channels: Number of input channels. If a list is provided, the model will have separate heads for each channel.
+    :param int decode_upscale: Upscaling factor for the decoding convolution.
+    """
+
     def __init__(
         self,
         in_channels,
@@ -271,6 +352,15 @@ class BaseEncBlock(nn.Module):
         )
 
     def forward(self, x, physics=None, y=None, img_channels=None, scale=0):
+        r"""
+        Forward pass of the encoding block.
+
+        :param torch.Tensor x: Input tensor
+        :param deepinv.physics.Physics physics: Physics
+        :param torch.Tensor y: Measurements
+        :param int img_channels: Number of input channels.
+        :param int scale: Scale factor for the encoding block.
+        """
         for i in range(len(self.enc)):
             x = self.enc[i](
                 x, physics=physics, y=y, img_channels=img_channels, scale=scale
@@ -288,12 +378,13 @@ def krylov_embeddings(y, p, factor, v=None, N=4, x_init=None):
     :param torch.Tensor v: Precomputed values to subtract from Krylov sequence. Defaults to None.
     :param int N: Number of Krylov iterations. Defaults to 4.
     :param torch.Tensor x_init: Initial guess. Defaults to None.
+    :return: torch.Tensor: a stacked tensor over the channel dimension containing Krylov embeddings.
     """
 
     if x_init is None:
         x = p.A_adjoint(y)
     else:
-        x = x_init.clone()  # Extract the first img_channels
+        x = x_init.clone()
 
     norm = factor**2  # Precompute normalization factor
     AtA = lambda u: p.A_adjoint(p.A(u)) * norm  # Define the linear operator
@@ -465,6 +556,15 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, x, physics=None, y=None, img_channels=None, scale=0):
+        r"""
+        Forward pass of the residual block.
+
+        :param torch.Tensor x: Input tensor
+        :param deepinv.physics.Physics physics: Physics
+        :param torch.Tensor y: Measurements
+        :param int img_channels: Number of input channels.
+        :param int scale: Scale factor for the encoding block.
+        """
         u = self.conv1(x)
         u = self.nl(u)
         u_2 = self.conv2(u)
@@ -554,6 +654,21 @@ class OutTail(torch.nn.Module):
 
 
 class Heads(torch.nn.Module):
+    r"""
+    General heads module for the RAM model.
+
+    :param list[int] in_channels_list: List of input channels for each head.
+    :param int out_channels: Number of output channels for the convolution.
+    :param int depth: Depth of the head block.
+    :param int scale: Scale factor for the downsampling or upsampling.
+    :param bool bias: Whether to use bias in the convolution.
+    :param str mode: Mode for the upsampling, e.g., "bilinear".
+    :param int c_mult: Multiplier for the number of channels.
+    :param int c_add: Additional channels to add to the input.
+    :param bool relu_in: If True, applies ReLU activation after the input convolution.
+    :param bool skip_in: If True, applies a skip connection from the input to the output.
+    """
+
     def __init__(
         self,
         in_channels_list,
@@ -617,6 +732,20 @@ class Heads(torch.nn.Module):
 
 
 class Tails(torch.nn.Module):
+    r"""
+    General tails module for the RAM model.
+
+    :param int in_channels: Number of input channels.
+    :param list[int] out_channels_list: List of output channels for each tail.
+    :param int depth: Depth of the tail block.
+    :param int scale: Scale factor for the upsampling.
+    :param bool bias: Whether to use bias in the convolution.
+    :param str mode: Mode for the upsampling, e.g., "bilinear".
+    :param int c_mult: Multiplier for the number of channels.
+    :param bool relu_in: If True, applies ReLU activation after the input convolution.
+    :param bool skip_in: If True, applies a skip connection from the input to the output.
+    """
+
     def __init__(
         self,
         in_channels,
@@ -678,6 +807,20 @@ class Tails(torch.nn.Module):
 
 
 class HeadBlock(torch.nn.Module):
+    r"""
+    Head block for the RAM model.
+
+    This module applies a series of convolutions to the input tensor, with optional skip connections and ReLU activations.
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param int kernel_size: Size of the convolution kernel.
+    :param bool bias: Whether to use bias in the convolution.
+    :param int depth: Depth of the head block.
+    :param bool relu_in: If True, applies ReLU activation after the input convolution.
+    :param bool skip_in: If True, applies a skip connection from the input to the output.
+    """
+
     def __init__(
         self,
         in_channels,
@@ -741,8 +884,28 @@ class HeadBlock(torch.nn.Module):
         return x
 
 
-# --------------------------------------------------------------------------------------
 class AffineConv2d(nn.Conv2d):
+    r"""
+    Convolutional layer with optional affine property.
+
+    An affine convolutional layer :math:`c` satisfies the following property:
+
+    .. math::
+        c(\alpha x + \beta) = \alpha c(x) + \beta
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param int kernel_size: Size of the convolution kernel.
+    :param str mode: Mode of the convolution, e.g., "affine" or "". If mode is "affine", the convolution will be affine, otherwise it will be a standard convolution.
+    :param bool bias: Whether to use bias in the convolution. Note that if `mode` is "affine", `bias` will be set to False.
+    :param int stride: Stride of the convolution.
+    :param int padding: Padding for the convolution.
+    :param int dilation: Dilation for the convolution.
+    :param int groups: Number of groups for the convolution.
+    :param str padding_mode: Padding mode for the convolution, e.g., "circular" or "zeros".
+    :param bool blind: If True, applies the affine transformation to the weight, otherwise keeps the original weight.
+    """
+
     def __init__(
         self,
         in_channels,
@@ -757,7 +920,7 @@ class AffineConv2d(nn.Conv2d):
         padding_mode="circular",
         blind=True,
     ):
-        if mode == "affine":  # f(a*x + 1) = a*f(x) + 1
+        if mode == "affine":
             bias = False
         super().__init__(
             in_channels,
@@ -774,7 +937,6 @@ class AffineConv2d(nn.Conv2d):
         self.mode = mode
 
     def affine(self, w):
-        """returns new kernels that encode affine combinations"""
         return (
             w.view(self.out_channels, -1).roll(1, 1).view(w.size())
             - w
@@ -808,32 +970,16 @@ class AffineConv2d(nn.Conv2d):
             )
 
 
-"""
-Functional blocks below
-
-Parts of code borrowed from
-https://github.com/cszn/DPIR/tree/master/models
-https://github.com/xinntao/BasicSR
-"""
-from collections import OrderedDict
-import torch
-import torch.nn as nn
-
-
-"""
-# --------------------------------------------
-# Advanced nn.Sequential
-# https://github.com/xinntao/BasicSR
-# --------------------------------------------
-"""
-
-
 def sequential(*args):
-    """Advanced nn.Sequential.
-    Args:
-        nn.Sequential, nn.Module
-    Returns:
-        nn.Sequential
+    r"""
+    Creates a sequential container from the provided arguments.
+
+    This function takes as input a list of modules or Sequential containers and returns a single nn.Sequential container.
+
+    Function borrowed from https://github.com/xinntao/BasicSR.
+
+    :param args: Modules or Sequential containers to be combined.
+    :return: nn.Sequential container containing all the modules.
     """
     if len(args) == 1:
         if isinstance(args[0], OrderedDict):
@@ -856,8 +1002,23 @@ def conv(
     stride=1,
     padding=1,
     bias=True,
-    mode="CBR",
+    mode="CR",
 ):
+    r"""
+    Conv + ReLU layer with optional transposed convolution.
+
+    Takes as input a string `mode` that defines the sequence of operations.
+
+    Code borrowed from https://github.com/cszn/DPIR/tree/master/models
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param int kernel_size: Size of the convolution kernel.
+    :param int stride: Stride of the convolution.
+    :param int padding: Padding for the convolution.
+    :param bool bias: Whether to use bias in the convolution.
+    :param str mode: Sequence of operations, e.g., "CR", "CT", "C", "T", etc.
+    """
     L = []
     for t in mode:
         if t == "C":
@@ -889,9 +1050,6 @@ def conv(
     return sequential(*L)
 
 
-# --------------------------------------------
-# convTranspose (+ relu)
-# --------------------------------------------
 def upsample_convtranspose(
     in_channels=64,
     out_channels=3,
@@ -899,12 +1057,25 @@ def upsample_convtranspose(
     bias=True,
     mode="2R",
 ):
+    r"""
+    Upsample using ConvTranspose2d + ReLU layer.
+
+    Takes as input a string `mode` that defines the sequence of operations.
+
+    Code borrowed from https://github.com/cszn/DPIR/tree/master/models
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param int padding: Padding for the convolution.
+    :param bool bias: Whether to use bias in the convolution.
+    :param str mode: Sequence of operations, e.g., "2R", "3", "4R", etc.
+    """
     assert len(mode) < 4 and mode[0] in [
         "2",
         "3",
         "4",
         "8",
-    ], "mode examples: 2, 2R, 2BR, 3, ..., 4BR."
+    ], "mode examples: 2, 2R, 2R, 3, ..., 4R."
     kernel_size = int(mode[0])
     stride = int(mode[0])
     mode = mode.replace(mode[0], "T")
@@ -927,6 +1098,17 @@ def downsample_strideconv(
     bias=True,
     mode="2R",
 ):
+    r"""
+    Downsample using Conv2d with stride + ReLU layer.
+
+    Takes as input a string `mode` that defines the sequence of operations.
+
+    :param int in_channels: Number of input channels.
+    :param int out_channels: Number of output channels.
+    :param int padding: Padding for the convolution.
+    :param bool bias: Whether to use bias in the convolution.
+    :param str mode: Sequence of operations, e.g., "2R", "3", "4R", etc.
+    """
     assert len(mode) < 4 and mode[0] in [
         "2",
         "3",

@@ -1,6 +1,13 @@
 from .inpainting import Inpainting, InpaintingDownsampling, Demosaicing
 from .compressed_sensing import CompressedSensing
-from .blur import Blur, Downsampling, BlurFFT, SpaceVaryingBlur, Upsampling
+from .blur import (
+    Blur,
+    Downsampling,
+    BlurFFT,
+    SpaceVaryingBlur,
+    Upsampling,
+    DownsamplingMatlab,
+)
 from .range import Decolorize
 from .haze import Haze
 from .unmixing import HyperSpectralUnmixing
@@ -30,7 +37,7 @@ from .noise import (
     SaltPepperNoise,
 )
 from .mri import MRI, DynamicMRI, SequentialMRI, MultiCoilMRI, MRIMixin
-from .multiscale import MultiScaleLinearPhysics, Pad
+from .wrappers import PhysicsMultiScaler, LinearPhysicsMultiScaler, PhysicsCropper
 from .tomography import Tomography, TomographyWithAstra
 from .lidar import SinglePhotonLidar
 from .singlepixel import SinglePixelCamera

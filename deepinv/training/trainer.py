@@ -1264,7 +1264,7 @@ class Trainer:
             wandb.save("model.h5")
             wandb.finish()
         if self.mlflow_vis:
-            mlflow.log_artifact("model.h5")
+            # Saving the weights remains to be implemented
             mlflow.end_run()
 
         return self.model

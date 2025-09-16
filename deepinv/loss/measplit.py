@@ -317,8 +317,7 @@ class SplittingLoss(Loss):
                 # Forward pass
                 out += self.model(y1, physics1) / eval_n_samples
 
-            if self.training and update_parameters:
-                self.mask = mask.clone()
+            self.mask = mask.clone()
 
             return out
 

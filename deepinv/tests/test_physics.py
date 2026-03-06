@@ -661,6 +661,34 @@ def test_filter_fft_2d_cache_invalidation(monkeypatch, device):
     assert out1 is not out2
 
 
+def test_filter_fft_2d_cache_keeps_multiple_modes(monkeypatch, device):
+    filter = torch.randn(1, 1, 5, 5, device=device)
+    img_size = (1, 16, 16)
+    rfft2_calls = {"count": 0}
+    fft2_calls = {"count": 0}
+    original_rfft2 = convolution_functional.fft.rfft2
+    original_fft2 = convolution_functional.fft.fft2
+
+    def wrapped_rfft2(*args, **kwargs):
+        rfft2_calls["count"] += 1
+        return original_rfft2(*args, **kwargs)
+
+    def wrapped_fft2(*args, **kwargs):
+        fft2_calls["count"] += 1
+        return original_fft2(*args, **kwargs)
+
+    monkeypatch.setattr(convolution_functional.fft, "rfft2", wrapped_rfft2)
+    monkeypatch.setattr(convolution_functional.fft, "fft2", wrapped_fft2)
+
+    convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+    convolution_functional.filter_fft_2d(filter, img_size, real_fft=False)
+    convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+    convolution_functional.filter_fft_2d(filter, img_size, real_fft=False)
+
+    assert rfft2_calls["count"] == 1
+    assert fft2_calls["count"] == 1
+
+
 def test_reset_noise(device):
     r"""
     Tests that the reset function works.

@@ -248,7 +248,7 @@ def filter_fft_2d(filter, img_size, real_fft=True):
                 "values": {cache_key: filter_fft},
             }
         else:
-            cache_entry["values"] = {cache_key: filter_fft}
+            cache_entry["values"][cache_key] = filter_fft
 
     return filter_fft
 

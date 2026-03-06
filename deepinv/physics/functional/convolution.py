@@ -2,6 +2,10 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 import torch.fft as fft
+import weakref
+
+
+_FILTER_FFT_CACHE = {}
 
 
 def conv2d(x: Tensor, filter: Tensor, padding: str = "valid") -> Tensor:
@@ -210,15 +214,43 @@ def conv_transpose2d_fft(y: Tensor, filter: Tensor, real_fft: bool = True) -> Te
 
 
 def filter_fft_2d(filter, img_size, real_fft=True):
+    cache_key = None
+    cache_entry = None
+    if not filter.requires_grad:
+        cache_key = (img_size[-2], img_size[-1], real_fft, filter._version)
+        filter_id = id(filter)
+        cache_entry = _FILTER_FFT_CACHE.get(filter_id)
+        if cache_entry is not None:
+            cached_filter = cache_entry["ref"]()
+            if cached_filter is filter and cache_key in cache_entry["values"]:
+                return cache_entry["values"][cache_key]
+            if cached_filter is not filter:
+                _FILTER_FFT_CACHE.pop(filter_id, None)
+                cache_entry = None
+
     ph = int((filter.shape[2] - 1) / 2)
     pw = int((filter.shape[3] - 1) / 2)
 
-    filt2 = torch.zeros(filter.shape[:2] + img_size[-2:], device=filter.device)
+    filt2 = filter.new_zeros(filter.shape[:2] + img_size[-2:])
 
     filt2[..., : filter.shape[2], : filter.shape[3]] = filter
     filt2 = torch.roll(filt2, shifts=(-ph, -pw), dims=(2, 3))
 
-    return fft.rfft2(filt2) if real_fft else fft.fft2(filt2)
+    filter_fft = fft.rfft2(filt2) if real_fft else fft.fft2(filt2)
+
+    if cache_key is not None:
+        if cache_entry is None:
+            filter_id = id(filter)
+            _FILTER_FFT_CACHE[filter_id] = {
+                "ref": weakref.ref(
+                    filter, lambda _ref, key=filter_id: _FILTER_FFT_CACHE.pop(key, None)
+                ),
+                "values": {cache_key: filter_fft},
+            }
+        else:
+            cache_entry["values"] = {cache_key: filter_fft}
+
+    return filter_fft
 
 
 def conv3d(x: Tensor, filter: Tensor, padding: str = "valid"):

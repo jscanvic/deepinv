@@ -2,6 +2,7 @@ import pytest
 import torch
 import numpy as np
 from deepinv.physics.forward import adjoint_function
+from deepinv.physics.functional import convolution as convolution_functional
 import deepinv as dinv
 from deepinv.optim.data_fidelity import L2
 
@@ -619,6 +620,45 @@ def test_blur(device):
 
     assert error_A < 1e-6
     assert error_At < 1e-6
+
+
+def test_filter_fft_2d_uses_cache(monkeypatch, device):
+    filter = torch.randn(1, 1, 5, 5, device=device)
+    img_size = (1, 16, 16)
+    call_count = {"count": 0}
+    original_rfft2 = convolution_functional.fft.rfft2
+
+    def wrapped_rfft2(*args, **kwargs):
+        call_count["count"] += 1
+        return original_rfft2(*args, **kwargs)
+
+    monkeypatch.setattr(convolution_functional.fft, "rfft2", wrapped_rfft2)
+
+    out1 = convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+    out2 = convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+
+    assert call_count["count"] == 1
+    assert out1 is out2
+
+
+def test_filter_fft_2d_cache_invalidation(monkeypatch, device):
+    filter = torch.randn(1, 1, 5, 5, device=device)
+    img_size = (1, 16, 16)
+    call_count = {"count": 0}
+    original_rfft2 = convolution_functional.fft.rfft2
+
+    def wrapped_rfft2(*args, **kwargs):
+        call_count["count"] += 1
+        return original_rfft2(*args, **kwargs)
+
+    monkeypatch.setattr(convolution_functional.fft, "rfft2", wrapped_rfft2)
+
+    out1 = convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+    filter.add_(1.0)
+    out2 = convolution_functional.filter_fft_2d(filter, img_size, real_fft=True)
+
+    assert call_count["count"] == 2
+    assert out1 is not out2
 
 
 def test_reset_noise(device):

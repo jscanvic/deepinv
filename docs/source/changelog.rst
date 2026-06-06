@@ -39,6 +39,7 @@ Changed
 - (Breaking) Drop support of `deepinv.Trainer.log_metrics_wandb` (:gh:`1210` by `Minh Hai Nguyen`_)
 - (Breaking) Drop support of parameter and attribute `freq_plot` in :class:`deepinv.Trainer` (:gh:`1210` by `Minh Hai Nguyen`_)
 - (Breaking) Drop support of deprecated value `"old_sequency"` for parameter `ordering` in :class:`deepinv.physics.SinglePixelCamera` (:gh:`1210` by `Minh Hai Nguyen`_)
+- (Breaking) Drop support of parameter `sigma` in :class:`deepinv.loss.R2RLoss` in favor of `noise_model` (:gh:`1210` by `Minh Hai Nguyen`_)
 
 Fixed
 ^^^^^

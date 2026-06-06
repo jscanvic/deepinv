@@ -32,6 +32,7 @@ Changed
 - New :class:`deepinv.loss.metric.NIQE` implementation, this drops PyIQA requirement, values given by NIQE vary between implementations (:gh:`911` by `Vicky De Ridder`_)
 - (Breaking) Drop support for deprecated parameters replaced by `img_size` and `output_size` (:gh:`1210` by `Minh Hai Nguyen`_)
 - (Breaking) Drop support of `deepinv.utils.metric` in favor of `deepinv.loss.metric` (:gh:`1210` by `Minh Hai Nguyen`_)
+- (Breaking) Drop support of parameter `pinv` in :class:`deepinv.models.ArtifactRemoval` (:gh:`1210` by `Minh Hai Nguyen`_)
 
 Fixed
 ^^^^^

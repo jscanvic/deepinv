@@ -37,6 +37,7 @@ Changed
 - (Breaking) Drop support of the deprecated parameter `eval_n_samples` in :meth:`deepinv.loss.SplittingLoss.adapt_model` (:gh:`1210` by `Minh Hai Nguyen`_)
 - (Breaking) Drop support of the deprecated parameter `fast` :class:`deepinv.physics.CompressedSensing` (:gh:`1210` by `Minh Hai Nguyen`_)
 - (Breaking) Drop support of `deepinv.Trainer.log_metrics_wandb` (:gh:`1210` by `Minh Hai Nguyen`_)
+- (Breaking) Drop support of parameter and attribute `freq_plot` in :class:`deepinv.Trainer` (:gh:`1210` by `Minh Hai Nguyen`_)
 
 Fixed
 ^^^^^

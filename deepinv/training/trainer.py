@@ -608,17 +608,6 @@ class Trainer:
                 print(f"{msg} successfully loaded from checkpoint: {ckpt_pretrained}")
             return checkpoint
 
-    def log_metrics_wandb(self, logs: dict, step: int, train: bool = True):
-        r"""
-        This method is deprecated and will be removed in a future release. Instead, use :func:`log_metrics_mlops`.
-        """
-        warnings.warn(
-            "This method is deprecated and will be removed in a future release. Use log_metrics_mlops instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.log_metrics_mlops(logs=logs, step=step, train=train)
-
     def log_metrics_mlops(self, logs: dict, step: int, train: bool = True):
         r"""
         Log the metrics to MLOps tools including wandb and MLflow.

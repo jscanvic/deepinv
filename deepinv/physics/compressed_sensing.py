@@ -4,7 +4,6 @@ import torch
 import numpy as np
 from deepinv.physics.functional import random_choice
 from torch import Tensor
-from deepinv.utils.decorators import _deprecated_alias
 
 
 def dst1(x: Tensor) -> Tensor:
@@ -98,7 +97,6 @@ class CompressedSensing(LinearPhysics):
 
     """
 
-    @_deprecated_alias(img_shape="img_size")
     def __init__(
         self,
         m: int,

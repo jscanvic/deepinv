@@ -4,7 +4,6 @@ from warnings import warn
 import torch
 from deepinv.physics.generator.base import PhysicsGenerator
 from deepinv.physics.functional.rand import random_choice
-from deepinv.utils.decorators import _deprecated_alias
 
 if TYPE_CHECKING:
     from deepinv.physics.generator.mri import BaseMaskGenerator
@@ -63,7 +62,6 @@ class BernoulliSplittingMaskGenerator(PhysicsGenerator):
     :param torch.Generator rng: torch random number generator.
     """
 
-    @_deprecated_alias(tensor_size="img_size")
     def __init__(
         self,
         img_size: tuple[int],
@@ -272,7 +270,6 @@ class MultiplicativeSplittingMaskGenerator(BernoulliSplittingMaskGenerator):
     :param str, torch.device device: device where the tensor is stored (default: 'cpu').
     """
 
-    @_deprecated_alias(tensor_size="img_size")
     def __init__(
         self,
         img_size: tuple[int],
@@ -374,7 +371,6 @@ class GaussianSplittingMaskGenerator(BernoulliSplittingMaskGenerator):
     :param torch.dtype dtype: the data type of the generated parameters
     """
 
-    @_deprecated_alias(tensor_size="img_size")
     def __init__(
         self,
         img_size: tuple[int],
@@ -531,7 +527,6 @@ class Phase2PhaseSplittingMaskGenerator(BernoulliSplittingMaskGenerator):
     :param torch.Generator rng: unused.
     """
 
-    @_deprecated_alias(tensor_size="img_size")
     def __init__(
         self,
         img_size: tuple[int],
@@ -592,7 +587,6 @@ class Artifact2ArtifactSplittingMaskGenerator(Phase2PhaseSplittingMaskGenerator)
     :param torch.Generator rng: torch random number generator.
     """
 
-    @_deprecated_alias(tensor_size="img_size")
     def __init__(
         self,
         img_size: tuple[int],

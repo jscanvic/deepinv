@@ -126,7 +126,9 @@ training = [
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = [
+    "linux-64",
     { platform = "linux-64", cuda = "12.0" },
+    "win-64",
     { platform = "win-64", cuda = "12.0" }
 ]
 
@@ -193,10 +195,10 @@ full      = { features = ["gpu", "doc", "test", "dataset", "denoisers", "physics
 docs      = { features = ["gpu", "doc", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "gpu-docs" }
 doctest   = { features = ["gpu", "doc", "test", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "gpu-docs" }
 # cpu environments (same as gpu but without the gpu dependencies)
-test-cpu  = { features = ["cpu", "test"],  solve-group = "cpu" }
-full-cpu  = { features = ["cpu", "doc", "test", "dataset", "denoisers", "physics", "training"], solve-group = "cpu" }
-docs-cpu  = { features = ["cpu", "doc", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "cpu-docs" }
-doctest-cpu = { features = ["cpu", "doc", "test", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "cpu-docs" }
+test-cpu    = { features = ["cpu", "test"],  solve-group = "cpu", platforms = ["linux-64", "win-64"] }
+full-cpu    = { features = ["cpu", "doc", "test", "dataset", "denoisers", "physics", "training"], solve-group = "cpu", platforms = ["linux-64", "win-64"] }
+docs-cpu    = { features = ["cpu", "doc", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "cpu-docs", platforms = ["linux-64", "win-64"] }
+doctest-cpu = { features = ["cpu", "doc", "test", "dataset", "denoisers", "physics", "training", "py312"], solve-group = "cpu-docs", platforms = ["linux-64", "win-64"] }
 
 ##############################################
 # Pytest configuration and coverage reporting
